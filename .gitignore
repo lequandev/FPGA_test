@@ -1,0 +1,23 @@
+# GoWin EDA build outputs
+impl/
+work/
+*.fs
+*.bin
+*.jed
+*.sdf
+*.vg
+*.vo
+*.rpt
+*.log
+*.bak
+
+# Simulation outputs
+sim/sim_out/
+*.vcd
+*.lxt
+*.fst
+
+# GoWin project cache
+*.gprj.user
+*.alo
+*.aoe
