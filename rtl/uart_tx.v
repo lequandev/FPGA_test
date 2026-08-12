@@ -1,117 +1,103 @@
 // =============================================================================
-// Module  : uart_tx.v
-// Project : Kiwi Nano 4K – LED PWM Demo
-// Board   : GoWin Kiwi Nano 4K (GW1NR-LV4QN48PC6/I5)
-//
-// Description:
-//   Simple 8N1 UART transmitter.
-//   When send_en goes HIGH for one clock cycle and tx_busy is LOW,
-//   tx_data is serialised and sent on uart_tx at the configured baud rate.
-//   tx_done pulses HIGH for one clock when transmission finishes.
+// Module      : uart_tx.v
+// Project     : Kiwi Nano 4K / Tang Nano 4K
+// Description : Low-level UART transmitter (8-bit Data, 1 Stop bit, No Parity)
 // =============================================================================
 
 module uart_tx #(
-    parameter CLK_FREQ  = 50_000_000,  // System clock (Hz)
-    parameter BAUD_RATE = 115_200      // UART baud rate (bps)
+    parameter CLK_FREQ  = 50_000_000,
+    parameter BAUD_RATE = 115_200
 )(
-    input  wire       clk,      // System clock
-    input  wire       rst_n,    // Active-low synchronous reset
-    input  wire       send_en,  // Start transmission (1-cycle pulse)
-    input  wire [7:0] tx_data,  // Byte to transmit
-    output reg        uart_tx,  // UART TX line (idle HIGH)
-    output wire       tx_busy,  // HIGH while transmitting
-    output reg        tx_done   // 1-cycle pulse when byte sent
+    input  wire       clk,
+    input  wire       rst_n,
+    input  wire       tx_start,
+    input  wire [7:0] tx_data,
+    output reg        tx_out,
+    output wire       tx_busy
 );
 
-    // -------------------------------------------------------------------------
-    // Baud rate divider
-    // -------------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    // Constants & Parameters
+    // ------------------------------------------------------------------------
     localparam integer CLKS_PER_BIT = CLK_FREQ / BAUD_RATE;
-    localparam integer CNT_WIDTH    = $clog2(CLKS_PER_BIT);
 
-    // -------------------------------------------------------------------------
-    // FSM states
-    // -------------------------------------------------------------------------
-    localparam [2:0] ST_IDLE  = 3'd0,
-                     ST_START = 3'd1,
-                     ST_DATA  = 3'd2,
-                     ST_STOP  = 3'd3;
+    localparam [1:0] IDLE  = 2'b00,
+                     START = 2'b01,
+                     DATA  = 2'b10,
+                     STOP  = 2'b11;
 
-    // -------------------------------------------------------------------------
-    // Registers
-    // -------------------------------------------------------------------------
-    reg [2:0]          state;
-    reg [CNT_WIDTH-1:0] baud_cnt;
-    reg [2:0]          bit_idx;   // Bit pointer 0-7
-    reg [7:0]          shift_reg; // Shadow copy of tx_data
+    // ------------------------------------------------------------------------
+    // Registers & Signals
+    // ------------------------------------------------------------------------
+    reg [1:0] state;
+    reg [8:0] clk_count;
+    reg [2:0] bit_index;
+    reg [7:0] tx_data_reg;
 
-    assign tx_busy = (state != ST_IDLE);
+    assign tx_busy = (state != IDLE);
 
-    // -------------------------------------------------------------------------
-    // FSM
-    // -------------------------------------------------------------------------
-    always @(posedge clk) begin
+    // =========================================================================
+    // KHỐI 1: BAUD RATE COUNTER & FSM CONTROLLER
+    // =========================================================================
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state     <= ST_IDLE;
-            uart_tx   <= 1'b1;   // Idle HIGH
-            baud_cnt  <= 0;
-            bit_idx   <= 0;
-            shift_reg <= 8'h00;
-            tx_done   <= 1'b0;
+            state       <= IDLE;
+            tx_out      <= 1'b1;
+            clk_count   <= 9'd0;
+            bit_index   <= 3'd0;
+            tx_data_reg <= 8'd0;
         end else begin
-            tx_done <= 1'b0; // default de-assert
-
             case (state)
-                // ----------------------------------------------------------
-                ST_IDLE: begin
-                    uart_tx <= 1'b1;
-                    if (send_en) begin
-                        shift_reg <= tx_data;
-                        baud_cnt  <= 0;
-                        state     <= ST_START;
+                IDLE: begin
+                    tx_out    <= 1'b1;
+                    clk_count <= 9'd0;
+                    bit_index <= 3'd0;
+
+                    if (tx_start) begin
+                        tx_data_reg <= tx_data;
+                        state       <= START;
                     end
                 end
 
-                // ----------------------------------------------------------
-                ST_START: begin
-                    uart_tx <= 1'b0; // Start bit (LOW)
-                    if (baud_cnt < CLKS_PER_BIT - 1) begin
-                        baud_cnt <= baud_cnt + 1;
+                START: begin
+                    tx_out <= 1'b0;
+
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1'b1;
                     end else begin
-                        baud_cnt <= 0;
-                        bit_idx  <= 0;
-                        state    <= ST_DATA;
+                        clk_count <= 9'd0;
+                        state     <= DATA;
                     end
                 end
 
-                // ----------------------------------------------------------
-                ST_DATA: begin
-                    uart_tx <= shift_reg[bit_idx]; // LSB first
-                    if (baud_cnt < CLKS_PER_BIT - 1) begin
-                        baud_cnt <= baud_cnt + 1;
+                DATA: begin
+                    tx_out <= tx_data_reg[bit_index];
+
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1'b1;
                     end else begin
-                        baud_cnt <= 0;
-                        if (bit_idx < 7) begin
-                            bit_idx <= bit_idx + 1;
+                        clk_count <= 9'd0;
+                        if (bit_index < 3'd7) begin
+                            bit_index <= bit_index + 1'b1;
                         end else begin
-                            state <= ST_STOP;
+                            bit_index <= 3'd0;
+                            state     <= STOP;
                         end
                     end
                 end
 
-                // ----------------------------------------------------------
-                ST_STOP: begin
-                    uart_tx <= 1'b1; // Stop bit (HIGH)
-                    if (baud_cnt < CLKS_PER_BIT - 1) begin
-                        baud_cnt <= baud_cnt + 1;
+                STOP: begin
+                    tx_out <= 1'b1;
+
+                    if (clk_count < CLKS_PER_BIT - 1) begin
+                        clk_count <= clk_count + 1'b1;
                     end else begin
-                        baud_cnt <= 0;
-                        tx_done  <= 1'b1;
-                        state    <= ST_IDLE;
+                        clk_count <= 9'd0;
+                        state     <= IDLE;
                     end
                 end
 
-                default: state <= ST_IDLE;
+                default: state <= IDLE;
             endcase
         end
     end
