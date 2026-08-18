@@ -2,25 +2,24 @@
 // File        : kiwi_1p5.cst
 // Project     : Kiwi 1P5 - FPGA PWM + UART
 // Board       : ONEKIWI KIWI FPGA TINY 1P5
-// Role        : Member 1 (File ràng buộc chân cho bo OneKiwi Kiwi 1P5)
-// Device      : GW1NSR-LV4CQN48PC6/I5 (Kiwi 1P5)
+// Device      : GW1NSR-LV4CQN48PC6/I5 (QFN48P)
 // =============================================================================
 
-// Clock input (Internal/Onboard Oscillator - Pin 45 / Pin 27)
+// Clock input (Pin 45)
 IO_LOC "sys_clk" 45;
 IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-// Push Buttons (Onboard buttons K1 & K2 - Active LOW)
-IO_LOC "btn1" 35;
+// Push Buttons (Active LOW - Pins 14 & 15)
+IO_LOC "btn1" 14;
 IO_PORT "btn1" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
-IO_LOC "btn2" 36;
+IO_LOC "btn2" 15;
 IO_PORT "btn2" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 // PWM Output LED (Onboard LED L1 - Pin 27)
 IO_LOC "led_pwm" 27;
 IO_PORT "led_pwm" IO_TYPE=LVCMOS33 DRIVE=8;
 
-// UART TX Pin (Onboard USB-UART Chip TX)
+// UART TX Pin (Bank 3 pin 19 -> LVCMOS18)
 IO_LOC "uart_tx_pin" 19;
-IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 DRIVE=8;
+IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS18 DRIVE=8;
