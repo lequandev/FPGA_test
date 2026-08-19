@@ -1,176 +1,111 @@
-// ============================================================================
-// Module      : pwm_led_controller.v
-// Target FPGA : Tang Nano 4K / Gowin GW1NSR-4C
-// ============================================================================
+// =============================================================================
+// Module      : pwm.v
+// Project     : Kiwi 1P5 EVK - PWM Controller (Clock 50MHz)
+// =============================================================================
 
-module pwm_led_controller (
-    input  wire       clk,
-    input  wire       rst_n,
-    input  wire [1:0] mode,
-    output reg        pwm_out
+module pwm (
+    input  wire       clk,        // 50 MHz Clock
+    input  wire       rst_n,      // Reset tích cực mức thấp
+    input  wire [1:0] mode,       // 00: OFF, 01: 25%, 10: 100%, 11: Breathing
+    output reg        pwm_out     // Ngõ ra logic PWM (Active High)
 );
 
-    // ------------------------------------------------------------------------
-    // Local Parameters
-    // ------------------------------------------------------------------------
-    localparam [8:0]  PRESCALER_MAX = 9'd263;
-    localparam [16:0] STEP_MAX      = 17'd105468;
-    localparam [7:0]  DUTY_25       = 8'd64;
-    localparam [7:0]  DUTY_100      = 8'd255;
+    // Tần số PWM = 50MHz / (196 * 256) ≈ 996.4 Hz (Chống mỏi mắt, nhìn êm)
+    localparam [7:0]  PRESCALER_MAX = 8'd195;
+    
+    // Tần số 50MHz: 2.0s cho 510 bước biến thiên Duty (255 lên + 255 xuống)
+    // STEP_MAX = (50,000,000 * 2.0) / 510 - 1 = 196,077
+    localparam [17:0] STEP_MAX      = 18'd196077;
 
-    // ------------------------------------------------------------------------
-    // Registers (Flip-Flops)
-    // ------------------------------------------------------------------------
-    reg [8:0]  prescaler_cnt;
+    localparam [7:0]  DUTY_25       = 8'd64;   // 25% Duty
+    localparam [7:0]  DUTY_100      = 8'd255;  // 100% Duty
+
+    reg [7:0]  prescaler_cnt;
     reg [7:0]  pwm_cnt;
-    reg [16:0] step_cnt;
+    reg [17:0] step_cnt;
     reg [7:0]  auto_duty;
     reg        dir;
+    reg [7:0]  active_duty;
 
-    // =========================================================================
-    // KHỐI 1: PRESCALER COUNTER (9-bit)
-    // =========================================================================
-    wire       prescaler_hit_max;
-    wire [8:0] prescaler_add1;
-    wire [8:0] prescaler_cnt_next;
-
-    // Comparator
-    assign prescaler_hit_max  = (prescaler_cnt >= PRESCALER_MAX);
-
-    // Adder +1
-    assign prescaler_add1     = prescaler_cnt + 1'b1;
-
-    // MUX 2:1
-    assign prescaler_cnt_next = (prescaler_hit_max) ? 9'd0 : prescaler_add1;
-
-    // DFF Register (9-bit)
+    // 1. Bộ chia tần (Prescaler)
+    wire prescaler_hit_max = (prescaler_cnt >= PRESCALER_MAX);
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) prescaler_cnt <= 9'd0;
-        else        prescaler_cnt <= prescaler_cnt_next;
+        if (!rst_n) 
+            prescaler_cnt <= 8'd0;
+        else 
+            prescaler_cnt <= (prescaler_hit_max) ? 8'd0 : (prescaler_cnt + 1'b1);
     end
 
-    // =========================================================================
-    // KHỐI 2: PWM COUNTER (8-bit)
-    // =========================================================================
-    wire [7:0] pwm_add1;
-    wire [7:0] pwm_cnt_next;
-
-    // Adder +1
-    assign pwm_add1     = pwm_cnt + 1'b1;
-
-    // MUX 2:1
-    assign pwm_cnt_next = (prescaler_hit_max) ? pwm_add1 : pwm_cnt;
-
-    // DFF Register (8-bit)
+    // 2. Bộ đếm PWM (0 -> 255)
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) pwm_cnt <= 8'd0;
-        else        pwm_cnt <= pwm_cnt_next;
+        if (!rst_n) 
+            pwm_cnt <= 8'd0;
+        else if (prescaler_hit_max) 
+            pwm_cnt <= pwm_cnt + 1'b1;
     end
 
-    // =========================================================================
-    // KHỐI 3: STEP COUNTER (17-bit)
-    // =========================================================================
-    wire        is_mode_auto;
-    wire        step_hit_max;
-    wire [16:0] step_add1;
-    wire [16:0] step_cnt_next;
+    // 3. Bộ đếm thời gian bước chuyển Duty cho chế độ Breathing
+    wire is_mode_auto = (mode == 2'b11);
+    wire step_hit_max = (step_cnt >= STEP_MAX);
 
-    // Comparator AUTO mode
-    assign is_mode_auto  = (mode == 2'b11);
-
-    // Comparator STEP_MAX
-    assign step_hit_max  = (step_cnt >= STEP_MAX);
-
-    // Adder +1
-    assign step_add1     = step_cnt + 1'b1;
-
-    // MUX 3:1
-    assign step_cnt_next = (!is_mode_auto) ? 17'd0 :
-                           (step_hit_max)  ? 17'd0 : step_add1;
-
-    // DFF Register (17-bit)
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) step_cnt <= 17'd0;
-        else        step_cnt <= step_cnt_next;
+        if (!rst_n) 
+            step_cnt <= 18'd0;
+        else if (!is_mode_auto) 
+            step_cnt <= 18'd0;
+        else 
+            step_cnt <= (step_hit_max) ? 18'd0 : (step_cnt + 1'b1);
     end
 
-    // =========================================================================
-    // KHỐI 4: AUTO BREATHING LOGIC
-    // =========================================================================
-    wire       is_duty_max;
-    wire       is_duty_min;
-    wire [7:0] auto_duty_add1;
-    wire [7:0] auto_duty_sub1;
-
-    // Comparators
-    assign is_duty_max    = (auto_duty == 8'd255);
-    assign is_duty_min    = (auto_duty == 8'd0);
-
-    // Adder & Subtractor
-    assign auto_duty_add1 = auto_duty + 1'b1;
-    assign auto_duty_sub1 = auto_duty - 1'b1;
-
-    // MUX dir_next
-    wire dir_next_temp;
-    assign dir_next_temp = (dir == 1'b0) ? (is_duty_max ? 1'b1 : 1'b0) :
-                                           (is_duty_min ? 1'b0 : 1'b1);
-
-    wire dir_next;
-    assign dir_next = (!is_mode_auto) ? 1'b0 :
-                      (step_hit_max)  ? dir_next_temp : dir;
-
-    // MUX auto_duty_next
-    wire [7:0] auto_duty_temp;
-    assign auto_duty_temp = (dir == 1'b0) ? (is_duty_max ? auto_duty_sub1 : auto_duty_add1) :
-                                            (is_duty_min ? auto_duty_add1 : auto_duty_sub1);
-
-    wire [7:0] auto_duty_next;
-    assign auto_duty_next = (!is_mode_auto) ? 8'd0 :
-                            (step_hit_max)  ? auto_duty_temp : auto_duty;
-
-    // DFF Registers
+    // 4. Máy phát Duty tự động (0 -> 255 -> 0 tuần tiến trong 2.0s)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             auto_duty <= 8'd0;
             dir       <= 1'b0;
-        end else begin
-            auto_duty <= auto_duty_next;
-            dir       <= dir_next;
+        end else if (!is_mode_auto) begin
+            auto_duty <= 8'd0;
+            dir       <= 1'b0;
+        end else if (step_hit_max) begin
+            if (!dir) begin // Đang tăng dần độ sáng
+                if (auto_duty == 8'd255) begin
+                    dir       <= 1'b1;
+                    auto_duty <= 8'd254;
+                end else begin
+                    auto_duty <= auto_duty + 1'b1;
+                end
+            end else begin  // Đang giảm dần độ sáng
+                if (auto_duty == 8'd0) begin
+                    dir       <= 1'b0;
+                    auto_duty <= 8'd1;
+                end else begin
+                    auto_duty <= auto_duty - 1'b1;
+                end
+            end
         end
     end
 
-    // =========================================================================
-    // KHỐI 5: MODE MUX
-    // =========================================================================
-    reg [7:0] active_duty;
-
+    // 5. Mux chọn Duty theo Mode
     always @(*) begin
         case (mode)
             2'b01:   active_duty = DUTY_25;
             2'b10:   active_duty = DUTY_100;
             2'b11:   active_duty = auto_duty;
-            default: active_duty = 8'd0;
+            default: active_duty = 8'd0; // Mode 00: Tắt
         endcase
     end
 
-    // =========================================================================
-    // KHỐI 6: PWM COMPARATOR & OUTPUT
-    // =========================================================================
-    wire is_duty_100_percent;
-    wire is_cnt_less_than_duty;
-    wire pwm_out_next;
-
-    // Comparators
-    assign is_duty_100_percent  = (active_duty == 8'd255);
-    assign is_cnt_less_than_duty = (pwm_cnt < active_duty);
-
-    // OR / MUX Logic
-    assign pwm_out_next = is_duty_100_percent ? 1'b1 : is_cnt_less_than_duty;
-
-    // Output DFF Register
+    // 6. Ngõ ra điều chế PWM
     always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) pwm_out <= 1'b0;
-        else        pwm_out <= pwm_out_next;
+        if (!rst_n) begin
+            pwm_out <= 1'b0;
+        end else begin
+            if (active_duty == 8'd0)
+                pwm_out <= 1'b0;
+            else if (active_duty == 8'd255)
+                pwm_out <= 1'b1;
+            else
+                pwm_out <= (pwm_cnt < active_duty);
+        end
     end
 
 endmodule
