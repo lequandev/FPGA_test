@@ -39,6 +39,7 @@ vlog -sv "$RTL_DIR/btn_debounce.v"
 vlog -sv "$RTL_DIR/fsm_control.v"
 vlog -sv "$RTL_DIR/uart_msg.v"
 vlog -sv "$RTL_DIR/top.v"
+vlog -sv "sim/dummy_pll.v"
 
 # ---------------------------------------------------------------------------
 # Compile testbench

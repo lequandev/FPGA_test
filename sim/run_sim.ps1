@@ -33,7 +33,8 @@ $RTL_FILES = @(
     "$RTL_DIR\btn_debounce.v",
     "$RTL_DIR\fsm_control.v",
     "$RTL_DIR\uart_msg.v",
-    "$RTL_DIR\top.v"
+    "$RTL_DIR\top.v",
+    "sim\dummy_pll.v"
 )
 
 # All available testbenches

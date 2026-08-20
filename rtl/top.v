@@ -7,7 +7,7 @@
 // =============================================================================
 
 module top (
-    input  wire clk_in,   // 50 MHz clock input
+    input  wire clk_in,   // 27 MHz clock input (from board)
     input  wire btn_1,    // Push button 1 (active-low)
     input  wire btn_2,    // Push button 2 (active-low)
     output wire led_pwm,  // PWM-dimmed LED
@@ -23,7 +23,12 @@ module top (
     // =========================================================================
     // Clock & Power-On Reset
     // =========================================================================
-    wire sys_clk = clk_in; // Assuming 50MHz is provided directly.
+    wire sys_clk;
+    
+    Gowin_rPLL pll_inst (
+        .clkout(sys_clk), // 50 MHz system clock
+        .clkin (clk_in)   // 27 MHz board clock
+    );
     
     reg [4:0] rst_cnt = 5'd0;
     reg       rst_n   = 1'b0;

@@ -5,7 +5,7 @@
 // =============================================================================
 
 // Clock onboard input (Bạn cần check lại Schematic xem thạch anh vào chân nào, thường là 47 hoặc 52)
-IO_LOC "clk_in" 47;
+IO_LOC "clk_in" 4;
 IO_PORT "clk_in" IO_TYPE=LVCMOS33;
 
 // Push Buttons (Active Low) - Dựa theo top_test_pwm.v cũ
@@ -20,5 +20,5 @@ IO_LOC "led_pwm" 27;
 IO_PORT "led_pwm" IO_TYPE=LVCMOS33;
 
 // UART Transmitter Output - Lên chip GWU2U (Cần check lại Schematic, thường là 8 hoặc 16)
-IO_LOC "uart_tx" 8;
+IO_LOC "uart_tx" 34;
 IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
