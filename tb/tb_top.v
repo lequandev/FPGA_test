@@ -1,17 +1,8 @@
 // =============================================================================
 // Testbench : tb_top.v
-// DUT       : top.v (Kiwi Nano 4K – LED PWM + UART Demo)
+// DUT       : top.v (Kiwi 1P5 - FPGA 2026)
 //
 // Simulation: Icarus Verilog (iverilog) or ModelSim / Questa
-//   iverilog -g2012 -I../rtl tb_top.v ../rtl/top.v ../rtl/pwm.v \
-//            ../rtl/uart_tx.v ../rtl/uart_msg.v ../rtl/btn_debounce.v \
-//            -o sim_out/tb_top && vvp sim_out/tb_top
-//
-// What this TB exercises:
-//   1. Power-on reset sequence
-//   2. BTN1 press  → PWM duty increases
-//   3. BTN2 press  → PWM duty decreases
-//   4. UART TX line monitored; captured byte printed to console
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -45,15 +36,39 @@ module tb_top;
     always #(CLK_PERIOD/2) clk_in = ~clk_in;
 
     // =========================================================================
-    // UART monitor – captures bytes transmitted by DUT and prints them
+    // UART string capture and checker
     // =========================================================================
     localparam BAUD_RATE   = 115_200;
     localparam BAUD_PERIOD = 1_000_000_000 / BAUD_RATE; // ns per bit
 
-    integer  uart_byte;
-    integer  bit_cnt;
-    reg      uart_prev = 1'b1;
-    real     uart_bit_time;
+    reg [8*15-1:0] captured_string = 0;
+    integer captured_len = 0;
+
+    task clear_uart_buffer;
+    begin
+        captured_string = 0;
+        captured_len = 0;
+    end
+    endtask
+
+    integer pass_cnt = 0;
+    integer fail_cnt = 0;
+
+    task check_uart_string;
+        input [8*15-1:0] expected_string;
+        input integer expected_len;
+        input [127:0] test_name;
+    begin
+        if (captured_len == expected_len && captured_string == expected_string) begin
+            $display("[PASS] %s - Got expected string", test_name);
+            pass_cnt = pass_cnt + 1;
+        end else begin
+            $display("[FAIL] %s - Expected '%s' (len %0d), Got '%s' (len %0d)", 
+                     test_name, expected_string, expected_len, captured_string, captured_len);
+            fail_cnt = fail_cnt + 1;
+        end
+    end
+    endtask
 
     task automatic capture_uart_byte;
         integer i;
@@ -71,103 +86,148 @@ module tb_top;
         // Skip stop bit
         #BAUD_PERIOD;
         $write("%c", rx_byte);
+        
+        // Append to buffer
+        captured_string = (captured_string << 8) | rx_byte;
+        captured_len = captured_len + 1;
     end
     endtask
 
-    // =========================================================================
     // UART listener thread (runs in background)
-    // =========================================================================
-    integer uart_char_cnt = 0;
     initial begin
         $display("[UART] Monitor started (115200 8N1)");
         forever begin
             capture_uart_byte;
-            uart_char_cnt = uart_char_cnt + 1;
         end
     end
 
     // =========================================================================
     // Helper tasks
     // =========================================================================
-
-    // Wait N clock cycles
-    task wait_clks(input integer n);
-        integer i;
-        for (i = 0; i < n; i = i + 1)
-            @(posedge clk_in);
+    task wait_ms(input integer ms);
+    begin
+        #(ms * 1_000_000); // 1 ms = 1,000,000 ns
+    end
     endtask
 
-    // Press button for N ms (active-low)
     task press_btn1(input integer hold_ms);
     begin
-        $display("[TB] BTN1 pressed (%0d ms)", hold_ms);
+        $display("\n[TB] --- BTN1 pressed (%0d ms) ---", hold_ms);
         btn_1 = 1'b0;
-        #(hold_ms * 1_000_000); // ns
+        wait_ms(hold_ms);
         btn_1 = 1'b1;
         $display("[TB] BTN1 released");
+        // Wait 15ms for debounce to register the release state (requires 10ms)
+        // and for UART transmission to complete (if any)
+        wait_ms(15); 
     end
     endtask
 
     task press_btn2(input integer hold_ms);
     begin
-        $display("[TB] BTN2 pressed (%0d ms)", hold_ms);
+        $display("\n[TB] --- BTN2 pressed (%0d ms) ---", hold_ms);
         btn_2 = 1'b0;
-        #(hold_ms * 1_000_000);
+        wait_ms(hold_ms);
         btn_2 = 1'b1;
         $display("[TB] BTN2 released");
+        wait_ms(15);
     end
     endtask
 
     // =========================================================================
-    // Stimulus
+    // Stimulus (Test Plan FPGA_Team_Assignments.md)
     // =========================================================================
     initial begin
-        // ---- Dump waveforms ------------------------------------------------
         $dumpfile("sim_out/tb_top.vcd");
         $dumpvars(0, tb_top);
 
         $display("=================================================");
-        $display("  Kiwi Nano 4K – top.v Testbench");
+        $display("  Kiwi 1P5 – FPGA 2026 Testbench");
         $display("=================================================");
 
-        // ---- Power-on reset (both buttons released) ------------------------
+        // TC1: Power-on Reset
+        $display("\n[TC1] Power-on Reset");
+        clear_uart_buffer;
         btn_1 = 1'b1;
         btn_2 = 1'b1;
-        wait_clks(50);
-        $display("[TB] Reset released – design should be running");
+        wait_ms(3);
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC1_PowerOn");
 
-        // ---- Wait for first UART transmission (500 ms simulated) -----------
-        // NOTE: 500 ms @ 50 MHz = 25 000 000 cycles; skip in sim with short wait
-        $display("[TB] Waiting for UART status report...");
-        #(6_000_000); // 6 ms sim time (covers debounce + partial uart)
+        // TC2: Button 1, 1st press -> HIGH
+        $display("\n[TC2] Press BTN1 (Switch to HIGH)");
+        clear_uart_buffer;
+        press_btn1(15); // Press for 15ms (> 10ms debounce)
+        check_uart_string({ "MODE: HIGH", 8'h0D, 8'h0A }, 12, "TC2_Btn1_HIGH");
 
-        // ---- Test: BTN1 single press (duty UP) -----------------------------
-        press_btn1(25); // 25 ms > 20 ms debounce
-        wait_clks(100);
+        // TC3: Button 1, 2nd press -> LOW
+        $display("\n[TC3] Press BTN1 2nd time (Switch to LOW)");
+        clear_uart_buffer;
+        press_btn1(15);
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC3_Btn1_LOW");
 
-        // ---- Test: BTN2 single press (duty DOWN) ---------------------------
-        press_btn2(25);
-        wait_clks(100);
+        // TC4: Button 2 -> AUTO
+        $display("\n[TC4] Press BTN2 (Switch to AUTO)");
+        clear_uart_buffer;
+        press_btn2(15);
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC4_Btn2_AUTO");
 
-        // ---- Test: BTN1 long press (auto-repeat ramp) ----------------------
-        $display("[TB] BTN1 long press – auto-repeat starts after 1s hold");
-        // In real HW: 1 second; in sim just check logic trigger timing
+        // TC5: Bounce test (Button noise < 10ms)
+        $display("\n[TC5] Bounce Test (Continuous press/release < 10ms)");
+        clear_uart_buffer;
+        btn_1 = 1'b0; wait_ms(2);
+        btn_1 = 1'b1; wait_ms(2);
+        btn_1 = 1'b0; wait_ms(3);
+        btn_1 = 1'b1; wait_ms(5);
+        wait_ms(5);
+        check_uart_string("", 0, "TC5_Bounce_NoOutput");
+
+        // TC6: In AUTO mode, press BTN1 -> LOW
+        $display("\n[TC6] In AUTO mode, Press BTN1 (Switch to LOW)");
+        clear_uart_buffer;
+        press_btn1(15);
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC6_AUTO_to_LOW");
+
+        // TC7: In LOW mode, press BTN2 -> AUTO
+        $display("\n[TC7] In LOW mode, Press BTN2 (Switch to AUTO)");
+        clear_uart_buffer;
+        press_btn2(15);
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC7_LOW_to_AUTO");
+
+        // TC8: In AUTO mode, press BTN2 again -> Remains AUTO (Check spam prevention)
+        $display("\n[TC8] In AUTO mode, Press BTN2 again (Keep AUTO)");
+        clear_uart_buffer;
+        press_btn2(15);
+        check_uart_string("", 0, "TC8_AUTO_SpamPrevent");
+
+        // TC9: Press both buttons simultaneously (BTN1 & BTN2)
+        $display("\n[TC9] Press both buttons simultaneously (Priority to AUTO transition)");
+        clear_uart_buffer;
+        press_btn1(15); 
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC9_Setup_LOW");
+        
+        clear_uart_buffer;
         btn_1 = 1'b0;
-        #(30_000_000); // 30 ms sim – enough to see a few debounce/pwm cycles
+        btn_2 = 1'b0;
+        wait_ms(15);
         btn_1 = 1'b1;
-        wait_clks(200);
+        btn_2 = 1'b1;
+        wait_ms(15);
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC9_BothBtn_AUTO");
 
-        // ---- Finish --------------------------------------------------------
-        $display("[TB] Simulation complete. UART chars captured: %0d", uart_char_cnt);
+        // --- Summary ---
+        $display("\n=================================================");
+        $display("=== Result: %0d PASS  %0d FAIL ===", pass_cnt, fail_cnt);
+        if (fail_cnt == 0)
+            $display("ALL TESTS PASSED");
+        else
+            $display("SOME TESTS FAILED");
         $display("=================================================");
         $finish;
     end
 
-    // =========================================================================
-    // Timeout watchdog (10 ms sim time)
-    // =========================================================================
+    // Timeout (Prevents infinite loops)
     initial begin
-        #100_000_000; // 100 ms
+        #(500_000_000); // 500 ms timeout
         $display("[TB] TIMEOUT – simulation forcibly ended");
         $finish;
     end

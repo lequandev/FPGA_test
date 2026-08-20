@@ -1,0 +1,24 @@
+// =============================================================================
+// File        : kiwi_1p5.cst
+// Project     : Kiwi 1P5 EVK - FPGA 2026
+// Description : Pin constraints cho board Kiwi 1P5 (GW1N-UV1P5 QN48X)
+// =============================================================================
+
+// Clock onboard input (Bạn cần check lại Schematic xem thạch anh vào chân nào, thường là 47 hoặc 52)
+IO_LOC "clk_in" 47;
+IO_PORT "clk_in" IO_TYPE=LVCMOS33;
+
+// Push Buttons (Active Low) - Dựa theo top_test_pwm.v cũ
+IO_LOC "btn_1" 35;
+IO_PORT "btn_1" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC "btn_2" 36;
+IO_PORT "btn_2" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// PWM LED Output - Dựa theo top_test_pwm.v cũ (D3 - Pin 27)
+IO_LOC "led_pwm" 27;
+IO_PORT "led_pwm" IO_TYPE=LVCMOS33;
+
+// UART Transmitter Output - Lên chip GWU2U (Cần check lại Schematic, thường là 8 hoặc 16)
+IO_LOC "uart_tx" 8;
+IO_PORT "uart_tx" IO_TYPE=LVCMOS33;
