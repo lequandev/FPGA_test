@@ -30,19 +30,17 @@ module tb_uart_tx;
     reg  [7:0] tx_data = 8'h00;
     wire       uart_tx;
     wire       tx_busy;
-    wire       tx_done;
 
     uart_tx #(
         .CLK_FREQ  (CLK_FREQ),
         .BAUD_RATE (BAUD_RATE)
     ) dut (
-        .clk     (clk),
-        .rst_n   (rst_n),
-        .send_en (send_en),
-        .tx_data (tx_data),
-        .uart_tx (uart_tx),
-        .tx_busy (tx_busy),
-        .tx_done (tx_done)
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .tx_start (send_en),
+        .tx_data  (tx_data),
+        .tx_out   (uart_tx),
+        .tx_busy  (tx_busy)
     );
 
     always #10 clk = ~clk; // 50 MHz
@@ -88,8 +86,8 @@ module tb_uart_tx;
         repeat(BIT_CLKS) @(posedge clk);
         stop_ok = (uart_tx === 1'b1);
 
-        // Wait for tx_done
-        @(posedge tx_done);
+        // Wait for tx_busy to go low (indicates transmission done)
+        @(negedge tx_busy);
 
         // Report
         if (start_ok && stop_ok && (rx_byte === byte_to_send)) begin

@@ -36,10 +36,39 @@ module tb_top;
     always #(CLK_PERIOD/2) clk_in = ~clk_in;
 
     // =========================================================================
-    // UART monitor – captures bytes transmitted by DUT and prints them
+    // UART string capture and checker
     // =========================================================================
     localparam BAUD_RATE   = 115_200;
     localparam BAUD_PERIOD = 1_000_000_000 / BAUD_RATE; // ns per bit
+
+    reg [8*15-1:0] captured_string = 0;
+    integer captured_len = 0;
+
+    task clear_uart_buffer;
+    begin
+        captured_string = 0;
+        captured_len = 0;
+    end
+    endtask
+
+    integer pass_cnt = 0;
+    integer fail_cnt = 0;
+
+    task check_uart_string;
+        input [8*15-1:0] expected_string;
+        input integer expected_len;
+        input [127:0] test_name;
+    begin
+        if (captured_len == expected_len && captured_string == expected_string) begin
+            $display("[PASS] %s - Got expected string", test_name);
+            pass_cnt = pass_cnt + 1;
+        end else begin
+            $display("[FAIL] %s - Expected '%s' (len %0d), Got '%s' (len %0d)", 
+                     test_name, expected_string, expected_len, captured_string, captured_len);
+            fail_cnt = fail_cnt + 1;
+        end
+    end
+    endtask
 
     task automatic capture_uart_byte;
         integer i;
@@ -57,16 +86,18 @@ module tb_top;
         // Skip stop bit
         #BAUD_PERIOD;
         $write("%c", rx_byte);
+        
+        // Append to buffer
+        captured_string = (captured_string << 8) | rx_byte;
+        captured_len = captured_len + 1;
     end
     endtask
 
     // UART listener thread (runs in background)
-    integer uart_char_cnt = 0;
     initial begin
         $display("[UART] Monitor started (115200 8N1)");
         forever begin
             capture_uart_byte;
-            uart_char_cnt = uart_char_cnt + 1;
         end
     end
 
@@ -99,8 +130,6 @@ module tb_top;
         wait_ms(hold_ms);
         btn_2 = 1'b1;
         $display("[TB] BTN2 released");
-        // Wait 15ms for debounce to register the release state (requires 10ms)
-        // and for UART transmission to complete (if any)
         wait_ms(15);
     end
     endtask
@@ -109,7 +138,7 @@ module tb_top;
     // Stimulus (Test Plan FPGA_Team_Assignments.md)
     // =========================================================================
     initial begin
-        $dumpfile("sim_out.vcd");
+        $dumpfile("sim_out/tb_top.vcd");
         $dumpvars(0, tb_top);
 
         $display("=================================================");
@@ -118,70 +147,80 @@ module tb_top;
 
         // TC1: Power-on Reset
         $display("\n[TC1] Power-on Reset");
+        clear_uart_buffer;
         btn_1 = 1'b1;
         btn_2 = 1'b1;
-        // Internal reset releases after 32 clock cycles
-        // UART takes ~1.1ms to transmit "MODE: LOW\r\n"
         wait_ms(3);
-        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC1_PowerOn");
 
         // TC2: Button 1, 1st press -> HIGH
         $display("\n[TC2] Press BTN1 (Switch to HIGH)");
+        clear_uart_buffer;
         press_btn1(15); // Press for 15ms (> 10ms debounce)
-        $display("[TB] Expect: 'MODE: HIGH\\r\\n' string appears above");
+        check_uart_string({ "MODE: HIGH", 8'h0D, 8'h0A }, 12, "TC2_Btn1_HIGH");
 
         // TC3: Button 1, 2nd press -> LOW
         $display("\n[TC3] Press BTN1 2nd time (Switch to LOW)");
+        clear_uart_buffer;
         press_btn1(15);
-        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC3_Btn1_LOW");
 
         // TC4: Button 2 -> AUTO
         $display("\n[TC4] Press BTN2 (Switch to AUTO)");
+        clear_uart_buffer;
         press_btn2(15);
-        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above");
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC4_Btn2_AUTO");
 
         // TC5: Bounce test (Button noise < 10ms)
         $display("\n[TC5] Bounce Test (Continuous press/release < 10ms)");
-        $display("[TB] Simulating BTN1 noise: press 2ms, release 2ms, press 2ms...");
+        clear_uart_buffer;
         btn_1 = 1'b0; wait_ms(2);
         btn_1 = 1'b1; wait_ms(2);
         btn_1 = 1'b0; wait_ms(3);
         btn_1 = 1'b1; wait_ms(5);
-        $display("[TB] Expect: No additional UART strings transmitted (10ms debounce not met)");
         wait_ms(5);
+        check_uart_string("", 0, "TC5_Bounce_NoOutput");
 
         // TC6: In AUTO mode, press BTN1 -> LOW
         $display("\n[TC6] In AUTO mode, Press BTN1 (Switch to LOW)");
+        clear_uart_buffer;
         press_btn1(15);
-        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC6_AUTO_to_LOW");
 
         // TC7: In LOW mode, press BTN2 -> AUTO
         $display("\n[TC7] In LOW mode, Press BTN2 (Switch to AUTO)");
+        clear_uart_buffer;
         press_btn2(15);
-        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above");
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC7_LOW_to_AUTO");
 
         // TC8: In AUTO mode, press BTN2 again -> Remains AUTO (Check spam prevention)
         $display("\n[TC8] In AUTO mode, Press BTN2 again (Keep AUTO)");
+        clear_uart_buffer;
         press_btn2(15);
-        $display("[TB] Expect: NO additional UART strings (prevents spam in AUTO)");
+        check_uart_string("", 0, "TC8_AUTO_SpamPrevent");
 
         // TC9: Press both buttons simultaneously (BTN1 & BTN2)
-        // FSM logic: btn2_pulse has priority, transitions to AUTO if not already AUTO
         $display("\n[TC9] Press both buttons simultaneously (Priority to AUTO transition)");
-        $display("[TB] --- BTN1 & BTN2 pressed (15 ms) ---");
-        // First switch to LOW for testing (since TC8 left it in AUTO)
+        clear_uart_buffer;
         press_btn1(15); 
-        $display("[TB] Switched to LOW.");
+        check_uart_string({ "MODE: LOW", 8'h0D, 8'h0A }, 11, "TC9_Setup_LOW");
         
+        clear_uart_buffer;
         btn_1 = 1'b0;
         btn_2 = 1'b0;
         wait_ms(15);
         btn_1 = 1'b1;
         btn_2 = 1'b1;
-        $display("[TB] BTN1 & BTN2 released");
         wait_ms(15);
-        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above due to btn2 priority");
-        $display("  Simulation Complete");
+        check_uart_string({ "MODE: AUTO", 8'h0D, 8'h0A }, 12, "TC9_BothBtn_AUTO");
+
+        // --- Summary ---
+        $display("\n=================================================");
+        $display("=== Result: %0d PASS  %0d FAIL ===", pass_cnt, fail_cnt);
+        if (fail_cnt == 0)
+            $display("ALL TESTS PASSED");
+        else
+            $display("SOME TESTS FAILED");
         $display("=================================================");
         $finish;
     end

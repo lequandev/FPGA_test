@@ -10,6 +10,7 @@
 #   powershell -ExecutionPolicy Bypass -File sim\run_sim.ps1
 #   powershell -ExecutionPolicy Bypass -File sim\run_sim.ps1 -TB tb_pwm
 #   powershell -ExecutionPolicy Bypass -File sim\run_sim.ps1 -TB tb_uart_tx
+#   powershell -ExecutionPolicy Bypass -File sim\run_sim.ps1 -TB tb_btn_debounce
 #   powershell -ExecutionPolicy Bypass -File sim\run_sim.ps1 -All
 # =============================================================================
 
@@ -30,12 +31,13 @@ $RTL_FILES = @(
     "$RTL_DIR\pwm.v",
     "$RTL_DIR\uart_tx.v",
     "$RTL_DIR\btn_debounce.v",
+    "$RTL_DIR\fsm_control.v",
     "$RTL_DIR\uart_msg.v",
     "$RTL_DIR\top.v"
 )
 
 # All available testbenches
-$ALL_TBS = @("tb_pwm", "tb_uart_tx", "tb_top")
+$ALL_TBS = @("tb_pwm", "tb_uart_tx", "tb_btn_debounce", "tb_top")
 
 # ---------------------------------------------------------------------------
 # Setup output directory

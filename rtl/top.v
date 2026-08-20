@@ -71,19 +71,28 @@ module top (
     // 2. FSM Controller & UART Message Dispatcher
     // =========================================================================
     wire [1:0] current_mode;
+    wire       mode_changed;
     wire       tx_busy;
     wire [7:0] tx_data;
     wire       tx_start;
 
-    uart_msg u_fsm (
-        .clk        (sys_clk),
-        .rst_n      (rst_n),
-        .btn1_pulse (btn1_pulse),
-        .btn2_pulse (btn2_pulse),
-        .mode       (current_mode),
-        .tx_busy    (tx_busy),
-        .tx_data    (tx_data),
-        .tx_start   (tx_start)
+    fsm_control u_fsm (
+        .clk          (sys_clk),
+        .rst_n        (rst_n),
+        .btn1_pulse   (btn1_pulse),
+        .btn2_pulse   (btn2_pulse),
+        .mode         (current_mode),
+        .mode_changed (mode_changed)
+    );
+
+    uart_msg u_msg (
+        .clk          (sys_clk),
+        .rst_n        (rst_n),
+        .mode         (current_mode),
+        .mode_changed (mode_changed),
+        .tx_busy      (tx_busy),
+        .tx_data      (tx_data),
+        .tx_start     (tx_start)
     );
 
     // =========================================================================

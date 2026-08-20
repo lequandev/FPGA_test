@@ -1,17 +1,16 @@
 // =============================================================================
 // Module      : uart_msg.v
 // Project     : Kiwi 1P5 / Nano 4K - FPGA 2026
-// Description : Main FSM Controller & UART Message Dispatcher
+// Description : UART Message Dispatcher (Sends strings based on mode changes)
 // =============================================================================
 
 module uart_msg (
     input  wire       clk,
     input  wire       rst_n,
-    input  wire       btn1_pulse,
-    input  wire       btn2_pulse,
-
-    // To PWM module
-    output reg  [1:0] mode,
+    
+    // From FSM Control
+    input  wire [1:0] mode,
+    input  wire       mode_changed,
 
     // To UART TX module
     input  wire       tx_busy,
@@ -39,9 +38,6 @@ module uart_msg (
     reg [3:0] msg_len;
     
     // ASCII strings (max 12 chars)
-    // "MODE: LOW\r\n"  (11 chars)
-    // "MODE: HIGH\r\n" (12 chars)
-    // "MODE: AUTO\r\n" (12 chars)
     reg [7:0] msg_buffer [0:11];
 
     // ------------------------------------------------------------------------
@@ -75,81 +71,50 @@ module uart_msg (
     endtask
 
     // ------------------------------------------------------------------------
-    // Main Control Logic (Mode FSM + UART String FSM)
+    // String Transmission Logic
     // ------------------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            mode     <= MODE_LOW;
-            tx_state <= ST_START; // Trigger first message on boot
+            tx_state <= ST_IDLE;
             tx_start <= 1'b0;
             tx_data  <= 8'd0;
             char_idx <= 4'd0;
-            load_msg(MODE_LOW);
+            msg_len  <= 4'd0;
         end else begin
             // Default assignments
             tx_start <= 1'b0;
 
-            // FSM Mode Transitions
-            if (tx_state == ST_IDLE) begin
-                if (btn2_pulse) begin
-                    // Button 2: Switch to AUTO directly
-                    if (mode != MODE_AUTO) begin
-                        mode <= MODE_AUTO;
-                        load_msg(MODE_AUTO);
-                        tx_state <= ST_START;
+            if (mode_changed) begin
+                load_msg(mode);
+                tx_state <= ST_START;
+                char_idx <= 4'd0;
+            end else begin
+                // String Transmission FSM
+                case (tx_state)
+                    ST_IDLE: begin
+                        char_idx <= 4'd0;
                     end
-                end else if (btn1_pulse) begin
-                    // Button 1: Toggle LOW <-> HIGH, or AUTO -> LOW
-                    case (mode)
-                        MODE_LOW: begin
-                            mode <= MODE_HIGH;
-                            load_msg(MODE_HIGH);
-                            tx_state <= ST_START;
+                    ST_START: begin
+                        if (!tx_busy) begin
+                            tx_data  <= msg_buffer[char_idx];
+                            tx_start <= 1'b1;
+                            tx_state <= ST_WAIT;
                         end
-                        MODE_HIGH: begin
-                            mode <= MODE_LOW;
-                            load_msg(MODE_LOW);
-                            tx_state <= ST_START;
+                    end
+                    ST_WAIT: begin
+                        if (tx_busy) begin
+                            // Wait for UART TX to finish current byte
+                            if (char_idx < msg_len - 1) begin
+                                char_idx <= char_idx + 1'b1;
+                                tx_state <= ST_START;
+                            end else begin
+                                tx_state <= ST_IDLE;
+                            end
                         end
-                        MODE_AUTO: begin
-                            mode <= MODE_LOW;
-                            load_msg(MODE_LOW);
-                            tx_state <= ST_START;
-                        end
-                        default: begin
-                            mode <= MODE_LOW;
-                            load_msg(MODE_LOW);
-                            tx_state <= ST_START;
-                        end
-                    endcase
-                end
+                    end
+                    default: tx_state <= ST_IDLE;
+                endcase
             end
-
-            // String Transmission FSM
-            case (tx_state)
-                ST_IDLE: begin
-                    char_idx <= 4'd0;
-                end
-                ST_START: begin
-                    if (!tx_busy) begin
-                        tx_data  <= msg_buffer[char_idx];
-                        tx_start <= 1'b1;
-                        tx_state <= ST_WAIT;
-                    end
-                end
-                ST_WAIT: begin
-                    if (tx_busy) begin
-                        // Wait for UART TX to finish current byte
-                        if (char_idx < msg_len - 1) begin
-                            char_idx <= char_idx + 1'b1;
-                            tx_state <= ST_START;
-                        end else begin
-                            tx_state <= ST_IDLE;
-                        end
-                    end
-                end
-                default: tx_state <= ST_IDLE;
-            endcase
         end
     end
 

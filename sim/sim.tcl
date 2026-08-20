@@ -6,6 +6,7 @@
 #   do sim/sim.tcl                    (runs tb_top)
 #   do sim/sim.tcl tb_pwm             (runs tb_pwm)
 #   do sim/sim.tcl tb_uart_tx         (runs tb_uart_tx)
+#   do sim/sim.tcl tb_btn_debounce    (runs tb_btn_debounce)
 # =============================================================================
 
 # Default testbench
@@ -35,6 +36,7 @@ puts "==> Compiling RTL..."
 vlog -sv "$RTL_DIR/pwm.v"
 vlog -sv "$RTL_DIR/uart_tx.v"
 vlog -sv "$RTL_DIR/btn_debounce.v"
+vlog -sv "$RTL_DIR/fsm_control.v"
 vlog -sv "$RTL_DIR/uart_msg.v"
 vlog -sv "$RTL_DIR/top.v"
 
