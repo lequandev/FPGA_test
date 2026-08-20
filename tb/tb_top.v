@@ -1,17 +1,8 @@
 // =============================================================================
 // Testbench : tb_top.v
-// DUT       : top.v (Kiwi Nano 4K – LED PWM + UART Demo)
+// DUT       : top.v (Kiwi 1P5 - FPGA 2026)
 //
 // Simulation: Icarus Verilog (iverilog) or ModelSim / Questa
-//   iverilog -g2012 -I../rtl tb_top.v ../rtl/top.v ../rtl/pwm.v \
-//            ../rtl/uart_tx.v ../rtl/uart_msg.v ../rtl/btn_debounce.v \
-//            -o sim_out/tb_top && vvp sim_out/tb_top
-//
-// What this TB exercises:
-//   1. Power-on reset sequence
-//   2. BTN1 press  → PWM duty increases
-//   3. BTN2 press  → PWM duty decreases
-//   4. UART TX line monitored; captured byte printed to console
 // =============================================================================
 
 `timescale 1ns / 1ps
@@ -50,11 +41,6 @@ module tb_top;
     localparam BAUD_RATE   = 115_200;
     localparam BAUD_PERIOD = 1_000_000_000 / BAUD_RATE; // ns per bit
 
-    integer  uart_byte;
-    integer  bit_cnt;
-    reg      uart_prev = 1'b1;
-    real     uart_bit_time;
-
     task automatic capture_uart_byte;
         integer i;
         reg [7:0] rx_byte;
@@ -74,9 +60,7 @@ module tb_top;
     end
     endtask
 
-    // =========================================================================
     // UART listener thread (runs in background)
-    // =========================================================================
     integer uart_char_cnt = 0;
     initial begin
         $display("[UART] Monitor started (115200 8N1)");
@@ -89,85 +73,122 @@ module tb_top;
     // =========================================================================
     // Helper tasks
     // =========================================================================
-
-    // Wait N clock cycles
-    task wait_clks(input integer n);
-        integer i;
-        for (i = 0; i < n; i = i + 1)
-            @(posedge clk_in);
+    task wait_ms(input integer ms);
+    begin
+        #(ms * 1_000_000); // 1 ms = 1,000,000 ns
+    end
     endtask
 
-    // Press button for N ms (active-low)
     task press_btn1(input integer hold_ms);
     begin
-        $display("[TB] BTN1 pressed (%0d ms)", hold_ms);
+        $display("\n[TB] --- BTN1 pressed (%0d ms) ---", hold_ms);
         btn_1 = 1'b0;
-        #(hold_ms * 1_000_000); // ns
+        wait_ms(hold_ms);
         btn_1 = 1'b1;
         $display("[TB] BTN1 released");
+        // Wait 15ms for debounce to register the release state (requires 10ms)
+        // and for UART transmission to complete (if any)
+        wait_ms(15); 
     end
     endtask
 
     task press_btn2(input integer hold_ms);
     begin
-        $display("[TB] BTN2 pressed (%0d ms)", hold_ms);
+        $display("\n[TB] --- BTN2 pressed (%0d ms) ---", hold_ms);
         btn_2 = 1'b0;
-        #(hold_ms * 1_000_000);
+        wait_ms(hold_ms);
         btn_2 = 1'b1;
         $display("[TB] BTN2 released");
+        // Wait 15ms for debounce to register the release state (requires 10ms)
+        // and for UART transmission to complete (if any)
+        wait_ms(15);
     end
     endtask
 
     // =========================================================================
-    // Stimulus
+    // Stimulus (Test Plan FPGA_Team_Assignments.md)
     // =========================================================================
     initial begin
-        // ---- Dump waveforms ------------------------------------------------
-        $dumpfile("sim_out/tb_top.vcd");
+        $dumpfile("sim_out.vcd");
         $dumpvars(0, tb_top);
 
         $display("=================================================");
-        $display("  Kiwi Nano 4K – top.v Testbench");
+        $display("  Kiwi 1P5 – FPGA 2026 Testbench");
         $display("=================================================");
 
-        // ---- Power-on reset (both buttons released) ------------------------
+        // TC1: Power-on Reset
+        $display("\n[TC1] Power-on Reset");
         btn_1 = 1'b1;
         btn_2 = 1'b1;
-        wait_clks(50);
-        $display("[TB] Reset released – design should be running");
+        // Internal reset releases after 32 clock cycles
+        // UART takes ~1.1ms to transmit "MODE: LOW\r\n"
+        wait_ms(3);
+        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
 
-        // ---- Wait for first UART transmission (500 ms simulated) -----------
-        // NOTE: 500 ms @ 50 MHz = 25 000 000 cycles; skip in sim with short wait
-        $display("[TB] Waiting for UART status report...");
-        #(6_000_000); // 6 ms sim time (covers debounce + partial uart)
+        // TC2: Button 1, 1st press -> HIGH
+        $display("\n[TC2] Press BTN1 (Switch to HIGH)");
+        press_btn1(15); // Press for 15ms (> 10ms debounce)
+        $display("[TB] Expect: 'MODE: HIGH\\r\\n' string appears above");
 
-        // ---- Test: BTN1 single press (duty UP) -----------------------------
-        press_btn1(25); // 25 ms > 20 ms debounce
-        wait_clks(100);
+        // TC3: Button 1, 2nd press -> LOW
+        $display("\n[TC3] Press BTN1 2nd time (Switch to LOW)");
+        press_btn1(15);
+        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
 
-        // ---- Test: BTN2 single press (duty DOWN) ---------------------------
-        press_btn2(25);
-        wait_clks(100);
+        // TC4: Button 2 -> AUTO
+        $display("\n[TC4] Press BTN2 (Switch to AUTO)");
+        press_btn2(15);
+        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above");
 
-        // ---- Test: BTN1 long press (auto-repeat ramp) ----------------------
-        $display("[TB] BTN1 long press – auto-repeat starts after 1s hold");
-        // In real HW: 1 second; in sim just check logic trigger timing
+        // TC5: Bounce test (Button noise < 10ms)
+        $display("\n[TC5] Bounce Test (Continuous press/release < 10ms)");
+        $display("[TB] Simulating BTN1 noise: press 2ms, release 2ms, press 2ms...");
+        btn_1 = 1'b0; wait_ms(2);
+        btn_1 = 1'b1; wait_ms(2);
+        btn_1 = 1'b0; wait_ms(3);
+        btn_1 = 1'b1; wait_ms(5);
+        $display("[TB] Expect: No additional UART strings transmitted (10ms debounce not met)");
+        wait_ms(5);
+
+        // TC6: In AUTO mode, press BTN1 -> LOW
+        $display("\n[TC6] In AUTO mode, Press BTN1 (Switch to LOW)");
+        press_btn1(15);
+        $display("[TB] Expect: 'MODE: LOW\\r\\n' string appears above");
+
+        // TC7: In LOW mode, press BTN2 -> AUTO
+        $display("\n[TC7] In LOW mode, Press BTN2 (Switch to AUTO)");
+        press_btn2(15);
+        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above");
+
+        // TC8: In AUTO mode, press BTN2 again -> Remains AUTO (Check spam prevention)
+        $display("\n[TC8] In AUTO mode, Press BTN2 again (Keep AUTO)");
+        press_btn2(15);
+        $display("[TB] Expect: NO additional UART strings (prevents spam in AUTO)");
+
+        // TC9: Press both buttons simultaneously (BTN1 & BTN2)
+        // FSM logic: btn2_pulse has priority, transitions to AUTO if not already AUTO
+        $display("\n[TC9] Press both buttons simultaneously (Priority to AUTO transition)");
+        $display("[TB] --- BTN1 & BTN2 pressed (15 ms) ---");
+        // First switch to LOW for testing (since TC8 left it in AUTO)
+        press_btn1(15); 
+        $display("[TB] Switched to LOW.");
+        
         btn_1 = 1'b0;
-        #(30_000_000); // 30 ms sim – enough to see a few debounce/pwm cycles
+        btn_2 = 1'b0;
+        wait_ms(15);
         btn_1 = 1'b1;
-        wait_clks(200);
-
-        // ---- Finish --------------------------------------------------------
-        $display("[TB] Simulation complete. UART chars captured: %0d", uart_char_cnt);
+        btn_2 = 1'b1;
+        $display("[TB] BTN1 & BTN2 released");
+        wait_ms(15);
+        $display("[TB] Expect: 'MODE: AUTO\\r\\n' string appears above due to btn2 priority");
+        $display("  Simulation Complete");
         $display("=================================================");
         $finish;
     end
 
-    // =========================================================================
-    // Timeout watchdog (10 ms sim time)
-    // =========================================================================
+    // Timeout (Prevents infinite loops)
     initial begin
-        #100_000_000; // 100 ms
+        #(500_000_000); // 500 ms timeout
         $display("[TB] TIMEOUT – simulation forcibly ended");
         $finish;
     end

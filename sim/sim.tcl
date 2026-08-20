@@ -9,8 +9,8 @@
 # =============================================================================
 
 # Default testbench
-if {[llength $argv] > 0} {
-    set TB_NAME [lindex $argv 0]
+if { [info exists 1] } {
+    set TB_NAME $1
 } else {
     set TB_NAME "tb_top"
 }
@@ -48,10 +48,10 @@ vlog -sv "$TB_DIR/$TB_NAME.v"
 # Simulate
 # ---------------------------------------------------------------------------
 puts "==> Starting simulation: $TB_NAME..."
-vsim -t 1ns -lib $WORK $TB_NAME
+vsim -t 1ns -voptargs="+acc" -lib $WORK $TB_NAME
 
 # Add all signals to wave window
-add wave -recursive *
+add wave -r /*
 
 # Run simulation
 run -all

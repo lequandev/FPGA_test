@@ -1,117 +1,154 @@
 // =============================================================================
 // Module      : uart_msg.v
-// Project     : Kiwi Nano 4K / Tang Nano 4K
-// Description : String-message formatting and transmission over UART
+// Project     : Kiwi 1P5 / Nano 4K - FPGA 2026
+// Description : Main FSM Controller & UART Message Dispatcher
 // =============================================================================
 
-module uart_msg #(
-    parameter CLK_FREQ  = 50_000_000,
-    parameter BAUD_RATE = 115_200
-)(
+module uart_msg (
     input  wire       clk,
     input  wire       rst_n,
-    input  wire       send_trigger,
-    input  wire       btn1_pressed,
-    input  wire       btn2_pressed,
-    input  wire [7:0] duty_pct,
-    output wire       uart_tx,
-    output wire       msg_busy
+    input  wire       btn1_pulse,
+    input  wire       btn2_pulse,
+
+    // To PWM module
+    output reg  [1:0] mode,
+
+    // To UART TX module
+    input  wire       tx_busy,
+    output reg  [7:0] tx_data,
+    output reg        tx_start
 );
 
     // ------------------------------------------------------------------------
-    // Constants & Parameters
+    // FSM States & Mode Definitions
     // ------------------------------------------------------------------------
-    localparam [1:0] IDLE      = 2'b00,
-                     LOAD_MSG  = 2'b01,
-                     SEND_BYTE = 2'b10,
-                     WAIT_TX   = 2'b11;
+    localparam [1:0] MODE_LOW  = 2'b00,
+                     MODE_HIGH = 2'b01,
+                     MODE_AUTO = 2'b10;
+
+    // String Transmission FSM
+    localparam [1:0] ST_IDLE  = 2'b00,
+                     ST_START = 2'b01,
+                     ST_WAIT  = 2'b10;
 
     // ------------------------------------------------------------------------
-    // Signals & Internal Registers
+    // Internal Registers
     // ------------------------------------------------------------------------
-    reg  [7:0] tx_byte;
-    reg        tx_start;
-    wire       tx_busy;
+    reg [1:0] tx_state;
+    reg [3:0] char_idx;
+    reg [3:0] msg_len;
+    
+    // ASCII strings (max 12 chars)
+    // "MODE: LOW\r\n"  (11 chars)
+    // "MODE: HIGH\r\n" (12 chars)
+    // "MODE: AUTO\r\n" (12 chars)
+    reg [7:0] msg_buffer [0:11];
 
-    reg  [4:0] byte_idx;
-    reg  [1:0] state;
+    // ------------------------------------------------------------------------
+    // Task to load message based on mode
+    // ------------------------------------------------------------------------
+    task load_msg;
+        input [1:0] current_mode;
+        begin
+            msg_buffer[0] <= "M"; msg_buffer[1] <= "O"; msg_buffer[2] <= "D"; msg_buffer[3] <= "E"; msg_buffer[4] <= ":"; msg_buffer[5] <= " ";
+            case (current_mode)
+                MODE_LOW: begin
+                    msg_buffer[6] <= "L"; msg_buffer[7] <= "O"; msg_buffer[8] <= "W"; 
+                    msg_buffer[9] <= 8'h0D; msg_buffer[10] <= 8'h0A; // \r\n
+                    msg_len <= 11;
+                end
+                MODE_HIGH: begin
+                    msg_buffer[6] <= "H"; msg_buffer[7] <= "I"; msg_buffer[8] <= "G"; msg_buffer[9] <= "H"; 
+                    msg_buffer[10] <= 8'h0D; msg_buffer[11] <= 8'h0A; // \r\n
+                    msg_len <= 12;
+                end
+                MODE_AUTO: begin
+                    msg_buffer[6] <= "A"; msg_buffer[7] <= "U"; msg_buffer[8] <= "T"; msg_buffer[9] <= "O"; 
+                    msg_buffer[10] <= 8'h0D; msg_buffer[11] <= 8'h0A; // \r\n
+                    msg_len <= 12;
+                end
+                default: begin
+                    msg_len <= 0;
+                end
+            endcase
+        end
+    endtask
 
-    // ASCII Converter
-    wire [7:0] pwm_hundreds = 8'h30 + (duty_pct / 100);
-    wire [7:0] pwm_tens     = 8'h30 + ((duty_pct % 100) / 10);
-    wire [7:0] pwm_ones     = 8'h30 + (duty_pct % 10);
-
-    // ROM Message Buffer (23 Bytes: "BTN1:X BTN2:X PWM:XXX\r\n")
-    reg  [7:0] msg_rom [0:22];
-
-    assign msg_busy = (state != IDLE);
-
-    // =========================================================================
-    // KHỐI 1: UART TRANSMITTER SUBMODULE INSTANCE
-    // =========================================================================
-    uart_tx #(
-        .CLK_FREQ  (CLK_FREQ),
-        .BAUD_RATE (BAUD_RATE)
-    ) u_uart_tx (
-        .clk      (clk),
-        .rst_n    (rst_n),
-        .tx_start (tx_start),
-        .tx_data  (tx_byte),
-        .tx_out   (uart_tx),
-        .tx_busy  (tx_busy)
-    );
-
-    // =========================================================================
-    // KHỐI 2: MESSAGE FORMATTING & FSM CONTROLLER
-    // =========================================================================
+    // ------------------------------------------------------------------------
+    // Main Control Logic (Mode FSM + UART String FSM)
+    // ------------------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state    <= IDLE;
-            byte_idx <= 5'd0;
+            mode     <= MODE_LOW;
+            tx_state <= ST_START; // Trigger first message on boot
             tx_start <= 1'b0;
-            tx_byte  <= 8'd0;
+            tx_data  <= 8'd0;
+            char_idx <= 4'd0;
+            load_msg(MODE_LOW);
         end else begin
+            // Default assignments
             tx_start <= 1'b0;
 
-            case (state)
-                IDLE: begin
-                    byte_idx <= 5'd0;
-                    if (send_trigger) begin
-                        msg_rom[0]  <= "B"; msg_rom[1]  <= "T"; msg_rom[2]  <= "N"; msg_rom[3]  <= "1"; msg_rom[4]  <= ":";
-                        msg_rom[5]  <= btn1_pressed ? "1" : "0";
-                        msg_rom[6]  <= " "; msg_rom[7]  <= "B"; msg_rom[8]  <= "T"; msg_rom[9]  <= "N"; msg_rom[10] <= "2"; msg_rom[11] <= ":";
-                        msg_rom[12] <= btn2_pressed ? "1" : "0";
-                        msg_rom[13] <= " "; msg_rom[14] <= "P"; msg_rom[15] <= "W"; msg_rom[16] <= "M"; msg_rom[17] <= ":";
-                        msg_rom[18] <= pwm_hundreds;
-                        msg_rom[19] <= pwm_tens;
-                        msg_rom[20] <= pwm_ones;
-                        msg_rom[21] <= 8'h0D; // '\r'
-                        msg_rom[22] <= 8'h0A; // '\n'
-
-                        state <= SEND_BYTE;
+            // FSM Mode Transitions
+            if (tx_state == ST_IDLE) begin
+                if (btn2_pulse) begin
+                    // Button 2: Switch to AUTO directly
+                    if (mode != MODE_AUTO) begin
+                        mode <= MODE_AUTO;
+                        load_msg(MODE_AUTO);
+                        tx_state <= ST_START;
                     end
+                end else if (btn1_pulse) begin
+                    // Button 1: Toggle LOW <-> HIGH, or AUTO -> LOW
+                    case (mode)
+                        MODE_LOW: begin
+                            mode <= MODE_HIGH;
+                            load_msg(MODE_HIGH);
+                            tx_state <= ST_START;
+                        end
+                        MODE_HIGH: begin
+                            mode <= MODE_LOW;
+                            load_msg(MODE_LOW);
+                            tx_state <= ST_START;
+                        end
+                        MODE_AUTO: begin
+                            mode <= MODE_LOW;
+                            load_msg(MODE_LOW);
+                            tx_state <= ST_START;
+                        end
+                        default: begin
+                            mode <= MODE_LOW;
+                            load_msg(MODE_LOW);
+                            tx_state <= ST_START;
+                        end
+                    endcase
                 end
+            end
 
-                SEND_BYTE: begin
+            // String Transmission FSM
+            case (tx_state)
+                ST_IDLE: begin
+                    char_idx <= 4'd0;
+                end
+                ST_START: begin
                     if (!tx_busy) begin
-                        tx_byte  <= msg_rom[byte_idx];
+                        tx_data  <= msg_buffer[char_idx];
                         tx_start <= 1'b1;
-                        state    <= WAIT_TX;
+                        tx_state <= ST_WAIT;
                     end
                 end
-
-                WAIT_TX: begin
+                ST_WAIT: begin
                     if (tx_busy) begin
-                        if (byte_idx < 5'd22) begin
-                            byte_idx <= byte_idx + 1'b1;
-                            state    <= SEND_BYTE;
+                        // Wait for UART TX to finish current byte
+                        if (char_idx < msg_len - 1) begin
+                            char_idx <= char_idx + 1'b1;
+                            tx_state <= ST_START;
                         end else begin
-                            state    <= IDLE;
+                            tx_state <= ST_IDLE;
                         end
                     end
                 end
-
-                default: state <= IDLE;
+                default: tx_state <= ST_IDLE;
             endcase
         end
     end
