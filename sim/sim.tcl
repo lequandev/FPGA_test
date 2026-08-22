@@ -6,11 +6,12 @@
 #   do sim/sim.tcl                    (runs tb_top)
 #   do sim/sim.tcl tb_pwm             (runs tb_pwm)
 #   do sim/sim.tcl tb_uart_tx         (runs tb_uart_tx)
+#   do sim/sim.tcl tb_btn_debounce    (runs tb_btn_debounce)
 # =============================================================================
 
 # Default testbench
-if {[llength $argv] > 0} {
-    set TB_NAME [lindex $argv 0]
+if { [info exists 1] } {
+    set TB_NAME $1
 } else {
     set TB_NAME "tb_top"
 }
@@ -35,6 +36,7 @@ puts "==> Compiling RTL..."
 vlog -sv "$RTL_DIR/pwm.v"
 vlog -sv "$RTL_DIR/uart_tx.v"
 vlog -sv "$RTL_DIR/btn_debounce.v"
+vlog -sv "$RTL_DIR/fsm_control.v"
 vlog -sv "$RTL_DIR/uart_msg.v"
 vlog -sv "$RTL_DIR/top.v"
 
@@ -48,10 +50,10 @@ vlog -sv "$TB_DIR/$TB_NAME.v"
 # Simulate
 # ---------------------------------------------------------------------------
 puts "==> Starting simulation: $TB_NAME..."
-vsim -t 1ns -lib $WORK $TB_NAME
+vsim -t 1ns -voptargs="+acc" -lib $WORK $TB_NAME
 
 # Add all signals to wave window
-add wave -recursive *
+add wave -r /*
 
 # Run simulation
 run -all
