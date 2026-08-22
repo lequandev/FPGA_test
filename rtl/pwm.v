@@ -1,21 +1,20 @@
 // =============================================================================
-// Module      : pwm.v
-// Project     : Kiwi 1P5 / Nano 4K - FPGA 2026
-// Description : PWM Generator for LED control
+// Module     : pwm.v
+// Project    : Kiwi 1P5 / Nano 4K - FPGA
+// Description: PWM Generator with 3 Modes (00: LOW 25%, 01: HIGH 100%, 10: AUTO)
 // =============================================================================
 
 module pwm (
     input  wire       clk,        // 50 MHz Clock
     input  wire       rst_n,      // Reset tích cực mức thấp
     input  wire [1:0] mode,       // 00: LOW (25%), 01: HIGH (100%), 10: AUTO (Breathing)
-    output reg        pwm_out     // Ngõ ra logic PWM (Active High)
+    output reg        pwm_out     // Ngõ ra logic PWM
 );
 
     // Tần số PWM = 50MHz / (196 * 256) ≈ 996.4 Hz (1 kHz)
     localparam [7:0]  PRESCALER_MAX = 8'd195;
     
     // Tần số 50MHz: 2.0s cho 510 bước biến thiên Duty (255 lên + 255 xuống)
-    // STEP_MAX = (50,000,000 * 2.0) / 510 - 1 = 196,077
     localparam [17:0] STEP_MAX      = 18'd196077;
 
     localparam [7:0]  DUTY_25       = 8'd64;   // 25% Duty
@@ -85,13 +84,13 @@ module pwm (
         end
     end
 
-    // 5. Mux chọn Duty theo Mode
+    // 5. Mux chọn Duty theo 3 Mode (00: LOW 25%, 01: HIGH 100%, 10: AUTO)
     always @(*) begin
         case (mode)
-            2'b00:   active_duty = DUTY_25;   // LOW
-            2'b01:   active_duty = DUTY_100;  // HIGH
-            2'b10:   active_duty = auto_duty; // AUTO
-            default: active_duty = DUTY_25;   // Fallback to LOW
+            2'b00:   active_duty = DUTY_25;   // LOW (25%)
+            2'b01:   active_duty = DUTY_100;  // HIGH (100%)
+            2'b10:   active_duty = auto_duty; // AUTO (Breathing 2.0s)
+            default: active_duty = DUTY_25;   // Mặc định về LOW nếu mode không hợp lệ
         endcase
     end
 

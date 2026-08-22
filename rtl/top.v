@@ -1,29 +1,26 @@
 // =============================================================================
 // Module  : top.v
 // Project : Kiwi 1P5 / Nano 4K - FPGA 2026
-// Description:
-//   Top-level design integrating PLL (bypassed for sim, pass-through), 
-//   Debounce, FSM (uart_msg), PWM, and UART TX.
+// Description: Top-level design with 3 PWM Modes (25%, 100%, AUTO)
 // =============================================================================
 
 module top (
-    input  wire clk_in,   // 50 MHz clock input
+    input  wire clk_in,   // 27 MHz clock input (from board)
     input  wire btn_1,    // Push button 1 (active-low)
     input  wire btn_2,    // Push button 2 (active-low)
     output wire led_pwm,  // PWM-dimmed LED
     output wire uart_tx   // UART TX (115200 8N1)
 );
 
-    // =========================================================================
-    // Parameters
-    // =========================================================================
     localparam CLK_FREQ  = 50_000_000;
     localparam BAUD_RATE = 115_200;
 
-    // =========================================================================
-    // Clock & Power-On Reset
-    // =========================================================================
-    wire sys_clk = clk_in; // Assuming 50MHz is provided directly.
+    wire sys_clk;
+    
+    Gowin_rPLL pll_inst (
+        .clkouta(sys_clk),
+        .clkin  (clk_in)   
+    );
     
     reg [4:0] rst_cnt = 5'd0;
     reg       rst_n   = 1'b0;
@@ -31,21 +28,19 @@ module top (
     always @(posedge sys_clk) begin
         if (!rst_n) begin
             if (rst_cnt == 5'd31)
-                rst_n <= 1'b1;
+                rst_n <= 1'b1; // Đã sửa lỗi: 1'b1 (trước đó bị gõ nhầm thành 1 me1)
             else
                 rst_cnt <= rst_cnt + 1'b1;
         end
     end
 
-    // =========================================================================
     // 1. Button Debouncers
-    // =========================================================================
     wire btn1_pulse;
     wire btn2_pulse;
 
     btn_debounce #(
         .CLK_FREQ    (CLK_FREQ),
-        .DEBOUNCE_MS (10) // 10ms debounce
+        .DEBOUNCE_MS (10)
     ) u_deb1 (
         .clk       (sys_clk),
         .rst_n     (rst_n),
@@ -57,7 +52,7 @@ module top (
 
     btn_debounce #(
         .CLK_FREQ    (CLK_FREQ),
-        .DEBOUNCE_MS (10) // 10ms debounce
+        .DEBOUNCE_MS (10)
     ) u_deb2 (
         .clk       (sys_clk),
         .rst_n     (rst_n),
@@ -67,9 +62,7 @@ module top (
         .btn_rel   ()
     );
 
-    // =========================================================================
     // 2. FSM Controller & UART Message Dispatcher
-    // =========================================================================
     wire [1:0] current_mode;
     wire       mode_changed;
     wire       tx_busy;
@@ -95,9 +88,7 @@ module top (
         .tx_start     (tx_start)
     );
 
-    // =========================================================================
-    // 3. PWM Generator
-    // =========================================================================
+    // 3. PWM Generator (3 Modes: 25%, 100%, AUTO)
     pwm u_pwm (
         .clk     (sys_clk),
         .rst_n   (rst_n),
@@ -105,9 +96,7 @@ module top (
         .pwm_out (led_pwm)
     );
 
-    // =========================================================================
     // 4. UART Transmitter
-    // =========================================================================
     uart_tx #(
         .CLK_FREQ  (CLK_FREQ),
         .BAUD_RATE (BAUD_RATE)
