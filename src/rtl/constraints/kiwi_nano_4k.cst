@@ -1,0 +1,25 @@
+// =============================================================================
+// File        : kiwi_nano_4k.cst
+// Project     : Kiwi Nano 4K - FPGA PWM + UART
+// Role        : Member 1 (File ràng buộc chân cho Gowin EDA)
+// Device      : GW1NR-LV4QN48PC6/I5 (Kiwi Nano 4K / Tang Nano 4K)
+// =============================================================================
+
+// Clock input (27 MHz Oscillator)
+IO_LOC "sys_clk" 33;
+IO_PORT "sys_clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// Push Buttons (Active LOW)
+IO_LOC "btn1" 14;
+IO_PORT "btn1" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+IO_LOC "btn2" 15;
+IO_PORT "btn2" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+
+// PWM Output LED
+IO_LOC "led_pwm" 10;
+IO_PORT "led_pwm" IO_TYPE=LVCMOS33 DRIVE=8;
+
+// UART TX Pin
+IO_LOC "uart_tx_pin" 16;
+IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 DRIVE=8;
